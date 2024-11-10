@@ -44,5 +44,5 @@ This project was inspired by the concept of counterfactual explanations in expla
 ## Note
 This is a basic implementation of a counterfactual generator, and the accuracy of the generated counterfactuals may not be optimal. This is an ongoing project, and we plan to improve the accuracy and functionality of the application in future updates. If you have any suggestions or contributions, please feel free to contact.
 
-# Disclaimer
+## Disclaimer
 Please note that the accuracy of the generated counterfactuals may vary depending on the quality of the input image and the pre-trained model used. This application is intended for educational and research purposes only, and should not be used for any critical or high-stakes applications.
