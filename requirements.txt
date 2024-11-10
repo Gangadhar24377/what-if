@@ -1,8 +1,9 @@
 # requirements.txt
-streamlit>=1.0.0
-torch>=1.9.0
-torchvision>=0.10.0
-numpy>=1.19.5
-pillow>=8.3.1
-matplotlib>=3.4.3
-scikit-image>=0.18.3
+streamlit
+torch
+torchvision
+numpy
+pillow
+matplotlib
+scikit-image
+json

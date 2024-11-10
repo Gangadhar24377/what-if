@@ -1,157 +1,143 @@
 # app.py
 import streamlit as st
 import torch
-import torchvision.models as models
-from PIL import Image
-import numpy as np
-from torchvision import transforms
 import json
-import matplotlib.pyplot as plt
 from models.classifier import ImageClassifier
 from models.counterfactual import CounterfactualGenerator
 from data.data_loader import ImageDataLoader
+import matplotlib.pyplot as plt
 
-# Load ImageNet class labels
-with open('Projects/what-if/imagenet_classes.json', 'r') as f:
-    class_labels = json.load(f)
+def load_imagenet_labels():
+    try:
+        with open('imagenet_classes.json', 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        from torchvision.models import ResNet50_Weights
+        class_idx = ResNet50_Weights.DEFAULT.meta['categories']
+        with open('imagenet_classes.json', 'w') as f:
+            json.dump(class_idx, f)
+        return class_idx
 
-def load_models():
-    """Initialize models with pretrained weights."""
-    classifier = ImageClassifier()
-    counterfactual_gen = CounterfactualGenerator(classifier)
-    return classifier, counterfactual_gen
-
-def get_prediction(model, image_tensor):
-    """Get model prediction and confidence."""
+def get_prediction(model, image_tensor, class_labels):
     with torch.no_grad():
         outputs = model(image_tensor)
         probabilities = torch.nn.functional.softmax(outputs, dim=1)
         confidence, predicted = torch.max(probabilities, 1)
-    return predicted.item(), confidence.item()
 
-def generate_explanation(counterfactual_img, original_img, target_class, original_class):
-    """Generate human-readable explanation of changes."""
-    # Calculate differences in key areas (simplified example)
-    diff = torch.abs(counterfactual_img - original_img).mean(dim=1)
-    
-    # Find areas of significant change
-    significant_changes = torch.where(diff > diff.mean() + diff.std())
-    
-    # Generate explanation based on changes
-    explanation = f"To change the classification from '{class_labels[original_class]}' to '{class_labels[target_class]}', the model made these changes:\n\n"
-    
-    # Analyze color changes
-    color_diff = (counterfactual_img - original_img).mean(dim=(2, 3))
-    for i, diff in enumerate(['red', 'green', 'blue']):
-        if abs(color_diff[0][i]) > 0.1:
-            direction = 'increased' if color_diff[0][i] > 0 else 'decreased'
-            explanation += f"- {direction} {diff} intensity\n"
-    
-    # Analyze spatial changes
-    spatial_diff = torch.abs(counterfactual_img - original_img).mean(dim=1)
-    if spatial_diff[:, :spatial_diff.shape[1]//2].mean() > spatial_diff[:, spatial_diff.shape[1]//2:].mean():
-        explanation += "- Modified features in the upper part of the image\n"
-    else:
-        explanation += "- Modified features in the lower part of the image\n"
-    
-    return explanation
+    predicted_index = predicted.item()
+    print(f"Predicted index: {predicted_index}")  # Debug statement to check predicted index range
+
+    if predicted_index >= len(class_labels):
+        raise KeyError(f"Predicted index {predicted_index} is out of bounds for class labels.")
+
+    predicted_class = class_labels[predicted_index] # Access the dictionary using the predicted index
+    return predicted_class, confidence.item()
 
 def main():
-    st.title("Explainable AI: Image Counterfactual Generator")
-    st.write("""
-    This app demonstrates explainable AI by showing what changes would be needed to make 
-    the model classify an image differently. Upload an image and select a target class to see 
-    the minimal changes required.
-    """)
+    st.title("What-If: Image Counterfactual Generator")
+    st.write("This app demonstrates explainable AI with image classification.")
 
-    # Initialize models
-    classifier, counterfactual_gen = load_models()
-    data_loader = ImageDataLoader()
+    # Load class labels first
+    st.write("Loading ImageNet labels...")
+    class_labels = load_imagenet_labels()
+    num_classes = len(class_labels)
+    st.write(f"Loaded {num_classes} class labels.")
 
-    # File uploader
+    @st.cache_resource
+    def load_models():
+        classifier = ImageClassifier(num_classes=num_classes)
+        counterfactual_gen = CounterfactualGenerator(classifier)
+        data_loader = ImageDataLoader()
+        return classifier, counterfactual_gen, data_loader
+
+    classifier, counterfactual_gen, data_loader = load_models()
+
     uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
 
     if uploaded_file is not None:
-        # Display original image
-        image = Image.open(uploaded_file).convert('RGB')
-        st.image(image, caption="Original Image", use_column_width=True)
+        try:
+            st.write("Loading image using ImageDataLoader...")
+            image_tensor = data_loader.load_image(uploaded_file)
+            st.write(f"Image loaded. Tensor shape: {image_tensor.shape}")
 
-        # Process image
-        image_tensor = data_loader.load_image(uploaded_file)
-        
-        # Get original prediction
-        original_class, confidence = get_prediction(classifier, image_tensor)
-        st.write(f"Original Classification: {class_labels[original_class]} (Confidence: {confidence:.2%})")
+            # Get original prediction
+            st.write("Getting original prediction...")
+            original_class, confidence = get_prediction(classifier, image_tensor, class_labels)
+            original_class = original_class   # Access the class label using the predicted index
+            st.write(f"Original Classification: {original_class} (Confidence: {confidence:.2%})")
 
-        # Target class selection
-        target_class = st.selectbox(
-            "Select target class for counterfactual",
-            options=list(range(len(class_labels))),
-            format_func=lambda x: class_labels[x]
-        )
+            # Target class selection
+            target_class_index = st.selectbox(
+                "Select target class for counterfactual",
+                options=list(range(num_classes)),
+                format_func=lambda x: class_labels[x]
+            )
+            target_class = class_labels[target_class_index]
 
-        if st.button("Generate Counterfactual"):
-            with st.spinner("Generating counterfactual explanation..."):
-                # Generate counterfactual
-                counterfactual = counterfactual_gen.generate(image_tensor, target_class)
-                
-                # Calculate difference
-                difference = torch.abs(counterfactual - image_tensor)
+            if st.button("Generate Counterfactual"):
+                with st.spinner("Generating counterfactual explanation..."):
+                    try:
+                        st.write("Generating counterfactual image...")
+                        # Generate counterfactual
+                        counterfactual = counterfactual_gen.generate(image_tensor, target_class, class_labels)
+                        st.write("Counterfactual generation complete.")
 
-                # Display results in columns
-                col1, col2, col3 = st.columns(3)
-                
-                # Original image
-                original_img = data_loader.inverse_transform(image_tensor)
-                col1.image(
-                    original_img.permute(1, 2, 0).numpy(),
-                    caption="Original Image",
-                    use_column_width=True
-                )
+                        # Calculate difference
+                        st.write("Calculating difference between original and counterfactual...")
+                        difference = torch.abs(counterfactual - image_tensor)
 
-                # Counterfactual image
-                counterfactual_img = data_loader.inverse_transform(counterfactual)
-                col2.image(
-                    counterfactual_img.permute(1, 2, 0).numpy(),
-                    caption="Counterfactual Image",
-                    use_column_width=True
-                )
+                        # Display results
+                        col1, col2, col3 = st.columns(3)
 
-                # Difference visualization
-                diff_img = data_loader.inverse_transform(difference * 3)  # Amplify differences
-                col3.image(
-                    diff_img.permute(1, 2, 0).numpy(),
-                    caption="Changes Made (Amplified)",
-                    use_column_width=True
-                )
+                        # Original image
+                        original_img = data_loader.inverse_transform(image_tensor)
+                        col1.image(
+                            original_img.permute(1, 2, 0).numpy(),
+                            caption="Original Image",
+                            use_container_width=True
+                        )
 
-                # Generate and display explanation
-                explanation = generate_explanation(
-                    counterfactual, 
-                    image_tensor, 
-                    target_class, 
-                    original_class
-                )
-                st.markdown("### Explanation of Changes")
-                st.write(explanation)
+                        # Counterfactual image
+                        counterfactual_img = data_loader.inverse_transform(counterfactual)
+                        col2.image(
+                            counterfactual_img.permute(1, 2, 0).numpy(),
+                            caption="Counterfactual Image",
+                            use_container_width=True
+                        )
 
-                # Feature importance visualization
-                st.markdown("### Feature Importance Heatmap")
-                fig, ax = plt.subplots()
-                heatmap = torch.abs(counterfactual - image_tensor).mean(dim=1).squeeze()
-                im = ax.imshow(heatmap, cmap='hot')
-                plt.colorbar(im)
-                ax.set_title("Areas of Significant Change")
-                st.pyplot(fig)
+                        # Difference visualization
+                        diff_img = data_loader.inverse_transform(difference * 3)  # Amplify differences
+                        col3.image(
+                            diff_img.permute(1, 2, 0).numpy(),
+                            caption="Changes Made (Amplified)",
+                            use_container_width=True
+                        )
 
-                # Add detailed analysis
-                st.markdown("### Statistical Analysis")
-                pixel_change = torch.abs(counterfactual - image_tensor).mean().item()
-                st.write(f"Average pixel change: {pixel_change:.3f}")
-                
-                # Confidence comparison
-                new_class, new_confidence = get_prediction(classifier, counterfactual)
-                st.write(f"New Classification: {class_labels[new_class]} (Confidence: {new_confidence:.2%})")
+                        # Add analysis
+                        st.markdown("### Analysis")
+                        new_class, new_confidence = get_prediction(classifier, counterfactual, class_labels)
+                        st.write(f"New Classification: {new_class} (Confidence: {new_confidence:.2%})")
+
+                        # Calculate and display change metrics
+                        pixel_change = torch.abs(counterfactual - image_tensor).mean().item()
+                        st.write(f"Average pixel change: {pixel_change:.3f}")
+
+                        # Show most significant changes
+                        st.markdown("### Areas of Significant Change")
+                        fig, ax = plt.subplots()
+                        heatmap = torch.abs(counterfactual - image_tensor).mean(dim=1).squeeze()
+                        im = ax.imshow(heatmap.numpy(), cmap='hot')
+                        plt.colorbar(im)
+                        ax.set_title("Change Heatmap")
+                        st.pyplot(fig)
+
+                    except Exception as e:
+                        st.error(f"Error during counterfactual generation: {str(e)}")
+
+        except KeyError as e:
+            st.error(f"Key error processing image: {str(e)}")
+        except Exception as e:
+            st.error(f"General error processing image: {type(e).__name__}: {str(e)}")
 
 if __name__ == "__main__":
     main()
