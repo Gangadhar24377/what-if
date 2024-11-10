@@ -29,6 +29,15 @@ To run the application, follow these steps:
 - Install the required dependencies: ```pip install -r requirements.txt```
 - Run the application: ```streamlit run app.py```
 
+# Examples:
+![image](https://github.com/user-attachments/assets/df929a8c-9321-43f7-b4ba-93d19bd7aaf9)
+
+## Areas of Significant Change
+![image](https://github.com/user-attachments/assets/7ced1157-dbdd-467a-b7d7-3385425004da)
+
+
+
+
 ## Acknowledgments
 This project was inspired by the concept of counterfactual explanations in explainable AI. The application uses pre-trained models and libraries to provide a user-friendly interface for generating counterfactuals.
 
